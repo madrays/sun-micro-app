@@ -1,0 +1,45 @@
+{
+  "appJsonVersion": "1.0",
+  "microAppId": "hslr-hello-world",
+  "version": "1.0.0",
+  "author": "hslr",
+  "entry": "main.js",
+  "icon": "logo.png",
+  "components": {
+    "pages": {
+      "hello-world-config": {
+        "background": "linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)"
+      }
+    },
+    "widgets": {
+      "hello-world-widget": {
+        "configComponentName": "hello-world-config",
+        "size": [
+          "1x1",
+          "1x2",
+          "1xfull",
+          "2x1",
+          "2x2",
+          "2x4"
+        ],
+        "background": "",
+        "isModifyBackground": false
+      }
+    }
+  },
+  "permissions": [],
+  "dataNodes": {},
+  "networkDomains": [],
+  "appInfo": {
+    "zh-CN": {
+      "appName": "Hello World",
+      "description": "Sun-Panel 演示微应用",
+      "networkDescription": "无需链接任何三方网站"
+    },
+    "en-US": {
+      "appName": "Hello World",
+      "description": "Micro App Hello World",
+      "networkDescription": "For demonstration purposes"
+    }
+  }
+}

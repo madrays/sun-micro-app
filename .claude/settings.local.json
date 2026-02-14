@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:doc.sun-panel.top)",
+      "Bash(npm install)"
+    ]
+  }
+}
