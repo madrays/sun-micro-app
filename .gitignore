@@ -2,6 +2,9 @@
 node_modules/
 package-lock.json
 
+# Claude
+.claude/
+
 # Build output
 dist/
 build/
