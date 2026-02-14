@@ -7,6 +7,15 @@ export class WeatherConfig extends SunPanelPageElement {
     apiKey: { type: String },
     apiHost: { type: String },
     amapKey: { type: String },
+    hasSavedApiKey: { type: Boolean },
+    hasSavedApiHost: { type: Boolean },
+    hasSavedAmapKey: { type: Boolean },
+    showApiKey: { type: Boolean },
+    showApiHost: { type: Boolean },
+    showAmapKey: { type: Boolean },
+    loadingApiKey: { type: Boolean },
+    loadingApiHost: { type: Boolean },
+    loadingAmapKey: { type: Boolean },
     locationMode: { type: String },
     location: { type: String },
     cityName: { type: String },
@@ -24,8 +33,17 @@ export class WeatherConfig extends SunPanelPageElement {
     super();
     this.widgetInfo = {};
     this.apiKey = '';
-    this.apiHost = 'devapi.qweather.com';
+    this.apiHost = '';
     this.amapKey = '';
+    this.hasSavedApiKey = false;
+    this.hasSavedApiHost = false;
+    this.hasSavedAmapKey = false;
+    this.showApiKey = false;
+    this.showApiHost = false;
+    this.showAmapKey = false;
+    this.loadingApiKey = false;
+    this.loadingApiHost = false;
+    this.loadingAmapKey = false;
     this.locationMode = 'manual';
     this.location = '101010100';
     this.cityName = '北京';
@@ -41,49 +59,133 @@ export class WeatherConfig extends SunPanelPageElement {
 
   async onInitialized({ widgetInfo, customParam }) {
     this.widgetInfo = widgetInfo || {};
-
     const config = this.widgetInfo?.config || {};
-    if (config.apiKey) {
-      this.apiKey = config.apiKey;
-      this.apiHost = config.apiHost || 'devapi.qweather.com';
-      this.amapKey = config.amapKey || '';
-      this.locationMode = config.locationMode || 'manual';
-      this.location = config.location || '101010100';
-      this.cityName = config.cityName || '北京';
-      this.longitude = config.longitude || '';
-      this.latitude = config.latitude || '';
-      this.refreshInterval = config.refreshInterval || 15;
-      this.textMode = config.textMode || 'light';
-    } else {
-      try {
-        // 从数据节点读取配置（apiKey 在 config 对象内）
-        const settings = await this.spCtx.api.dataNode.user.getByKey('settings', 'config');
-        if (settings) {
-          this.apiKey = settings.apiKey || '';
-          this.apiHost = settings.apiHost || 'devapi.qweather.com';
-          this.amapKey = settings.amapKey || '';
-          this.locationMode = settings.locationMode || 'manual';
-          this.location = settings.location || '101010100';
-          this.cityName = settings.cityName || '北京';
-          this.longitude = settings.longitude || '';
-          this.latitude = settings.latitude || '';
-          this.refreshInterval = settings.refreshInterval || 15;
-          this.textMode = settings.textMode || 'light';
-        }
-      } catch (e) {
-        // 配置加载失败，使用默认值
-      }
-    }
+    this.apiKey = '';
+    this.apiHost = '';
+    this.amapKey = '';
+    this.showApiKey = false;
+    this.showApiHost = false;
+    this.showAmapKey = false;
+    this.loadingApiKey = false;
+    this.loadingApiHost = false;
+    this.loadingAmapKey = false;
+    this.error = '';
+    this.locationStatus = '';
+    // 仅从 widget 配置读取非敏感字段
+    this.locationMode = config.locationMode || 'manual';
+    this.location = config.location || '101010100';
+    this.cityName = config.cityName || '北京';
+    this.refreshInterval = config.refreshInterval || 15;
+    this.textMode = config.textMode || 'light';
+    this.longitude = config.longitude || '';
+    this.latitude = config.latitude || '';
+    this.hasSavedApiKey = Boolean(config.hasSavedApiKey ?? config.templateDataNode);
+    this.hasSavedApiHost = Boolean(config.hasSavedApiHost ?? config.templateDataNode);
+    this.hasSavedAmapKey = Boolean(config.hasSavedAmapKey);
     this.requestUpdate();
   }
 
-  async reverseGeocodeAMap(longitude, latitude) {
-    if (!this.amapKey) {
-      return null;
+  getMaskedPlaceholder(name, hasSaved) {
+    return hasSaved ? `•••••• 已保存（点击右侧眼睛读取${name}）` : '';
+  }
+
+  getSecretStatus(hasSaved, loading) {
+    if (loading) return '读取中...';
+    return hasSaved ? '已保存' : '未保存';
+  }
+
+  getSecretStatusClass(hasSaved, loading) {
+    if (loading) return 'status-tag loading';
+    return hasSaved ? 'status-tag saved' : 'status-tag empty';
+  }
+
+  async toggleSecretVisibility(secretName) {
+    const mapping = {
+      apiKey: {
+        show: 'showApiKey',
+        loading: 'loadingApiKey',
+        saved: 'hasSavedApiKey',
+        value: 'apiKey',
+        label: '和风 API Key'
+      },
+      apiHost: {
+        show: 'showApiHost',
+        loading: 'loadingApiHost',
+        saved: 'hasSavedApiHost',
+        value: 'apiHost',
+        label: '和风 Host'
+      },
+      amapKey: {
+        show: 'showAmapKey',
+        loading: 'loadingAmapKey',
+        saved: 'hasSavedAmapKey',
+        value: 'amapKey',
+        label: '高德 Key'
+      }
+    };
+
+    const item = mapping[secretName];
+    if (!item) return;
+
+    if (this[item.show]) {
+      this[item.show] = false;
+      return;
     }
+
+    const hasLocalValue = Boolean(this[item.value]?.trim());
+    if (hasLocalValue) {
+      this[item.show] = true;
+      return;
+    }
+
+    this[item.loading] = true;
+    this.error = '';
     try {
+      const value = await this.spCtx.api.dataNode.app.getByKey('config', secretName);
+      if (typeof value === 'string' && value.trim()) {
+        this[item.value] = value.trim();
+        this[item.saved] = true;
+      } else {
+        this[item.saved] = false;
+      }
+      this[item.show] = true;
+    } catch (e) {
+      const msg = String(e?.message || '').toLowerCase();
+      if (Number(e?.code) === 1202 || msg.includes('no data record found') || msg.includes('data node not found')) {
+        this[item.saved] = false;
+        this.error = `${item.label} 尚未保存`;
+      } else {
+        this.error = `读取${item.label}失败: ${e?.message || '未知错误'}`;
+      }
+    } finally {
+      this[item.loading] = false;
+    }
+  }
+
+  normalizeHost(host) {
+    return host.replace(/^https?:\/\//, '').replace(/\/$/, '').trim();
+  }
+
+  async reverseGeocodeAMap(longitude, latitude) {
+    try {
+      const amapKeyInput = this.amapKey.trim();
+      if (amapKeyInput) {
+        await this.spCtx.api.dataNode.app.setByKey('config', 'amapKey', amapKeyInput);
+        this.hasSavedAmapKey = true;
+      } else if (!this.hasSavedAmapKey) {
+        return null;
+      }
+
+      // 敏感数据与经纬度都走 dataNode + templateReplacements
+      await this.spCtx.api.dataNode.app.setByKey('config', 'geoLocation', `${longitude},${latitude}`);
+
       const response = await this.spCtx.api.network.request({
-        targetUrl: `https://restapi.amap.com/v3/geocode/regeo?key=${this.amapKey}&location=${longitude},${latitude}&extensions=base`
+        targetUrl: 'https://restapi.amap.com/v3/geocode/regeo?key={{amapKey}}&location={{geoLocation}}&extensions=base',
+        method: 'GET',
+        templateReplacements: [
+          { placeholder: '{{amapKey}}', fields: ['targetUrl'], dataNode: 'config.amapKey' },
+          { placeholder: '{{geoLocation}}', fields: ['targetUrl'], dataNode: 'config.geoLocation' }
+        ]
       });
       const data = response?.data || response;
 
@@ -136,18 +238,18 @@ export class WeatherConfig extends SunPanelPageElement {
       this.longitude = position.coords.longitude.toFixed(2);
       this.latitude = position.coords.latitude.toFixed(2);
 
-      // 尝试使用高德API获取城市名
-      if (this.amapKey) {
+      // 尝试使用高德API获取城市名（未输入但已保存时，也可直接走 dataNode）
+      if (this.amapKey.trim() || this.hasSavedAmapKey) {
         this.locationStatus = '正在获取城市名称...';
         const cityName = await this.reverseGeocodeAMap(this.longitude, this.latitude);
         if (cityName) {
           this.cityName = cityName;
           this.locationStatus = `定位成功: ${cityName} (${this.longitude}, ${this.latitude})`;
         } else {
-          this.locationStatus = `定位成功: ${this.longitude}, ${this.latitude}`;
+          this.locationStatus = `已获取坐标: ${this.longitude}, ${this.latitude}`;
         }
       } else {
-        this.locationStatus = `定位成功: ${this.longitude}, ${this.latitude}`;
+        this.locationStatus = `已获取坐标: ${this.longitude}, ${this.latitude}（未配置高德 Key，无法自动识别城市名）`;
       }
     } catch (e) {
       const errorMsg = {
@@ -173,7 +275,9 @@ export class WeatherConfig extends SunPanelPageElement {
   }
 
   async handleSaveOrCreateWidget() {
-    if (!this.apiKey.trim()) {
+    const apiKeyValue = this.apiKey.trim();
+    const hasAvailableApiKey = Boolean(apiKeyValue || this.hasSavedApiKey);
+    if (!hasAvailableApiKey) {
       this.error = '请输入和风天气 API Key';
       return;
     }
@@ -188,49 +292,61 @@ export class WeatherConfig extends SunPanelPageElement {
     this.error = '';
 
     try {
-      // 配置数据
-      const configData = {
-        apiHost: this.apiHost.trim() || 'devapi.qweather.com',
-        amapKey: this.amapKey.trim(),
+      let hasSavedApiKey = this.hasSavedApiKey;
+      let hasSavedApiHost = this.hasSavedApiHost;
+      let hasSavedAmapKey = this.hasSavedAmapKey;
+
+      const apiHostInput = this.apiHost.trim();
+      const apiHostValue = this.normalizeHost(apiHostInput || 'devapi.qweather.com');
+      const amapKeyValue = this.amapKey.trim();
+
+      // 敏感数据写入 dataNode.app，不通过 widget.config 暴露。
+      // 留空代表保持已保存值（不覆盖为空）。
+      if (apiKeyValue) {
+        await this.spCtx.api.dataNode.app.setByKey('config', 'apiKey', apiKeyValue);
+        hasSavedApiKey = true;
+      }
+
+      if (apiHostInput || !hasSavedApiHost) {
+        await this.spCtx.api.dataNode.app.setByKey('config', 'apiHost', apiHostValue);
+        hasSavedApiHost = true;
+      }
+
+      if (amapKeyValue) {
+        await this.spCtx.api.dataNode.app.setByKey('config', 'amapKey', amapKeyValue);
+        hasSavedAmapKey = true;
+      }
+
+      await this.spCtx.api.dataNode.app.setByKey('config', 'locationValue', locationValue);
+
+      // 非敏感配置
+      const publicConfigData = {
         locationMode: this.locationMode,
         location: this.location.trim(),
         cityName: this.cityName.trim() || '未知',
-        longitude: this.longitude,
-        latitude: this.latitude,
         refreshInterval: this.refreshInterval,
         textMode: this.textMode,
-        locationValue
+        longitude: this.longitude,
+        latitude: this.latitude,
+        hasSavedApiKey,
+        hasSavedApiHost,
+        hasSavedAmapKey,
+        templateDataNode: 'config.apiKey'
       };
 
-      // 调试：打印要存储的数据
-      console.log('[WeatherConfig] 准备存储 apiKey (包装为对象):', this.apiKey.trim());
+      // dataNode 里保留完整配置（包含经纬度）
+      await this.spCtx.api.dataNode.app.setByKey('config', 'settings', publicConfigData);
 
-      // apiKey 单独存储为一个 key（value 必须是对象）
-      // templateReplacements 的 dataNode 格式：节点名.key -> settings.apiKey
-      const apiKeyResult = await this.spCtx.api.dataNode.user.setByKey('settings', 'apiKey', { value: this.apiKey.trim() });
-      console.log('[WeatherConfig] apiKey setByKey 返回结果:', apiKeyResult);
+      this.hasSavedApiKey = hasSavedApiKey;
+      this.hasSavedApiHost = hasSavedApiHost;
+      this.hasSavedAmapKey = hasSavedAmapKey;
 
-      // 其他配置存储
-      const configResult = await this.spCtx.api.dataNode.user.setByKey('settings', 'config', configData);
-      console.log('[WeatherConfig] config setByKey 返回结果:', configResult);
-
-      // 验证：读取刚存储的数据
-      try {
-        const readApiKey = await this.spCtx.api.dataNode.user.getByKey('settings', 'apiKey');
-        console.log('[WeatherConfig] getByKey apiKey 读取结果:', readApiKey);
-        console.log('[WeatherConfig] readApiKey.value:', readApiKey?.value);
-      } catch (err) {
-        console.error('[WeatherConfig] getByKey apiKey 失败:', err);
-      }
-
-      // 保存 widget 配置（前端使用）
-      this.spCtx.api.widget.save({
+      // 保存 widget 配置（仅非敏感字段）
+      await this.spCtx.api.widget.save({
         ...this.widgetInfo,
-        config: { ...configData, apiKey: this.apiKey.trim() }
+        config: publicConfigData
       });
-      console.log('[WeatherConfig] widget.save 完成');
     } catch (e) {
-      console.error('[WeatherConfig] 保存失败:', e);
       this.error = '保存失败: ' + (e?.message || '未知错误');
     } finally {
       this.saving = false;
@@ -259,6 +375,14 @@ export class WeatherConfig extends SunPanelPageElement {
 
   get iconMap() {
     return html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6"/><line x1="8" y1="2" x2="8" y2="18"/><line x1="16" y1="6" x2="16" y2="22"/></svg>`;
+  }
+
+  get iconEye() {
+    return html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>`;
+  }
+
+  get iconEyeOff() {
+    return html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.94 17.94A10.94 10.94 0 0 1 12 19C5 19 1 12 1 12a21.85 21.85 0 0 1 5.06-5.94"/><path d="M9.9 4.24A10.9 10.9 0 0 1 12 4c7 0 11 8 11 8a21.86 21.86 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>`;
   }
 
   render() {
@@ -303,7 +427,15 @@ export class WeatherConfig extends SunPanelPageElement {
         .section-title { font-size: 13px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.5px; }
         .form-row { margin-bottom: 16px; }
         .form-row:last-child { margin-bottom: 0; }
+        .label-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          margin-bottom: 6px;
+        }
         .form-label { display: block; font-size: 13px; font-weight: 500; color: ${colors.text}; margin-bottom: 6px; }
+        .label-row .form-label { margin-bottom: 0; }
         .form-input {
           width: 100%; padding: 10px 12px; font-size: 14px;
           border: 1px solid ${colors.border}; border-radius: 6px;
@@ -312,14 +444,62 @@ export class WeatherConfig extends SunPanelPageElement {
         }
         .form-input:focus { outline: none; border-color: ${colors.accent}; }
         .form-input::placeholder { color: ${colors.textSecondary}; }
+        .input-wrap {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) 42px;
+          gap: 8px;
+          align-items: center;
+        }
+        .btn-eye {
+          height: 40px;
+          border: 1px solid ${colors.border};
+          background: ${colors.inputBg};
+          color: ${colors.textSecondary};
+          border-radius: 6px;
+          cursor: pointer;
+          transition: all 0.2s;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .btn-eye:hover:not(:disabled) {
+          color: ${colors.accent};
+          border-color: ${colors.accent};
+        }
+        .btn-eye:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+        .status-tag {
+          font-size: 11px;
+          padding: 2px 8px;
+          border-radius: 999px;
+          border: 1px solid transparent;
+          line-height: 1.5;
+        }
+        .status-tag.saved {
+          color: ${dark ? '#86efac' : '#166534'};
+          border-color: ${dark ? 'rgba(34,197,94,.35)' : '#86efac'};
+          background: ${dark ? 'rgba(34,197,94,.12)' : '#f0fdf4'};
+        }
+        .status-tag.empty {
+          color: ${colors.textSecondary};
+          border-color: ${colors.border};
+          background: ${dark ? 'rgba(255,255,255,.04)' : '#f9fafb'};
+        }
+        .status-tag.loading {
+          color: ${dark ? '#93c5fd' : '#1d4ed8'};
+          border-color: ${dark ? 'rgba(59,130,246,.4)' : '#bfdbfe'};
+          background: ${dark ? 'rgba(59,130,246,.12)' : '#eff6ff'};
+        }
         .form-hint { font-size: 12px; color: ${colors.textSecondary}; margin-top: 4px; }
         .form-hint a { color: ${colors.accent}; text-decoration: none; }
         .info-box {
           display: flex; align-items: flex-start; gap: 8px;
           padding: 10px 12px; margin-bottom: 16px; font-size: 12px;
-          color: ${dark ? '#fbbf24' : '#b45309'};
-          background: ${dark ? 'rgba(251, 191, 36, 0.1)' : 'rgba(251, 191, 36, 0.08)'};
-          border: 1px solid ${dark ? 'rgba(251, 191, 36, 0.3)' : 'rgba(251, 191, 36, 0.4)'};
+          color: ${dark ? '#93c5fd' : '#1e3a8a'};
+          background: ${dark ? 'rgba(59, 130, 246, 0.1)' : 'rgba(59, 130, 246, 0.06)'};
+          border: 1px solid ${dark ? 'rgba(59, 130, 246, 0.3)' : 'rgba(59, 130, 246, 0.28)'};
           border-radius: 6px; line-height: 1.5;
         }
         .info-box svg { flex-shrink: 0; margin-top: 2px; }
@@ -406,35 +586,80 @@ export class WeatherConfig extends SunPanelPageElement {
             <div class="info-box">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
               <div>
-                请确保 API 域名已添加到微应用的网络白名单中，否则无法正常请求数据。<br>
-                当前已配置: <code>devapi.qweather.com</code> <code>api.qweather.com</code> <code>restapi.amap.com</code>
+                敏感字段默认隐藏。点击右侧眼睛会在当次操作时调用 <code>dataNode.app.getByKey</code> 读取并展示；不点击不会回显明文。<br>
+                空值保存策略：留空不会覆盖已保存密钥。若使用自定义 Host，请先在 <code>networkDomains</code> 白名单声明对应域名。
               </div>
             </div>
 
             <div class="form-row">
-              <label class="form-label">和风天气 API Key *</label>
-              <input type="text" class="form-input"
-                .value="${this.apiKey}"
-                @input="${(e) => { this.apiKey = e.target.value; this.error = ''; }}"
-                placeholder="输入和风天气 API Key">
+              <div class="label-row">
+                <label class="form-label">和风天气 API Key *</label>
+                <span class="${this.getSecretStatusClass(this.hasSavedApiKey, this.loadingApiKey)}">
+                  ${this.getSecretStatus(this.hasSavedApiKey, this.loadingApiKey)}
+                </span>
+              </div>
+              <div class="input-wrap">
+                <input class="form-input"
+                  type="${this.showApiKey ? 'text' : 'password'}"
+                  autocomplete="off"
+                  .value="${this.apiKey}"
+                  @input="${(e) => { this.apiKey = e.target.value; this.error = ''; }}"
+                  placeholder="${this.getMaskedPlaceholder('和风 API Key', this.hasSavedApiKey) || '输入和风天气 API Key'}">
+                <button type="button" class="btn-eye"
+                  title="${this.showApiKey ? '隐藏' : '显示'}"
+                  ?disabled="${this.loadingApiKey}"
+                  @click="${() => this.toggleSecretVisibility('apiKey')}">
+                  ${this.showApiKey ? this.iconEyeOff : this.iconEye}
+                </button>
+              </div>
               <div class="form-hint">在 <a href="https://dev.qweather.com" target="_blank">和风天气开发平台</a> 获取</div>
             </div>
 
             <div class="form-row">
-              <label class="form-label">API Host</label>
-              <input type="text" class="form-input"
-                .value="${this.apiHost}"
-                @input="${(e) => this.apiHost = e.target.value}"
-                placeholder="devapi.qweather.com">
-              <div class="form-hint">参考和风天气官方文档</div>
+              <div class="label-row">
+                <label class="form-label">和风 API Host</label>
+                <span class="${this.getSecretStatusClass(this.hasSavedApiHost, this.loadingApiHost)}">
+                  ${this.getSecretStatus(this.hasSavedApiHost, this.loadingApiHost)}
+                </span>
+              </div>
+              <div class="input-wrap">
+                <input class="form-input"
+                  type="${this.showApiHost ? 'text' : 'password'}"
+                  autocomplete="off"
+                  .value="${this.apiHost}"
+                  @input="${(e) => { this.apiHost = e.target.value; this.error = ''; }}"
+                  placeholder="${this.getMaskedPlaceholder('和风 Host', this.hasSavedApiHost) || 'devapi.qweather.com'}">
+                <button type="button" class="btn-eye"
+                  title="${this.showApiHost ? '隐藏' : '显示'}"
+                  ?disabled="${this.loadingApiHost}"
+                  @click="${() => this.toggleSecretVisibility('apiHost')}">
+                  ${this.showApiHost ? this.iconEyeOff : this.iconEye}
+                </button>
+              </div>
+              <div class="form-hint">不填时默认使用 <code>devapi.qweather.com</code></div>
             </div>
 
             <div class="form-row">
-              <label class="form-label">高德地图 API Key (可选)</label>
-              <input type="text" class="form-input"
-                .value="${this.amapKey}"
-                @input="${(e) => this.amapKey = e.target.value}"
-                placeholder="用于自动定位时获取城市名称">
+              <div class="label-row">
+                <label class="form-label">高德地图 API Key（可选）</label>
+                <span class="${this.getSecretStatusClass(this.hasSavedAmapKey, this.loadingAmapKey)}">
+                  ${this.getSecretStatus(this.hasSavedAmapKey, this.loadingAmapKey)}
+                </span>
+              </div>
+              <div class="input-wrap">
+                <input class="form-input"
+                  type="${this.showAmapKey ? 'text' : 'password'}"
+                  autocomplete="off"
+                  .value="${this.amapKey}"
+                  @input="${(e) => { this.amapKey = e.target.value; this.error = ''; }}"
+                  placeholder="${this.getMaskedPlaceholder('高德 Key', this.hasSavedAmapKey) || '用于自动定位时获取城市名称'}">
+                <button type="button" class="btn-eye"
+                  title="${this.showAmapKey ? '隐藏' : '显示'}"
+                  ?disabled="${this.loadingAmapKey}"
+                  @click="${() => this.toggleSecretVisibility('amapKey')}">
+                  ${this.showAmapKey ? this.iconEyeOff : this.iconEye}
+                </button>
+              </div>
               <div class="form-hint">在 <a href="https://console.amap.com" target="_blank">高德开放平台</a> 获取，用于逆地理编码</div>
             </div>
           </div>

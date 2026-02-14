@@ -27,8 +27,12 @@ export default {
   ],
 
   dataNodes: {
+    config: {
+      scope: 'app',
+      isPublic: true
+    },
     settings: {
-      scope: 'user',
+      scope: 'app',
       isPublic: true
     }
   }

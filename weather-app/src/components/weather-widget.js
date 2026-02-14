@@ -21,18 +21,14 @@ export class WeatherWidget extends SunPanelWidgetElement {
     this.daily = [];
     this.loading = true;
     this.error = '';
-    this.config = null;
+    this.config = {};
     this._refreshTimer = null;
   }
 
   async onInitialized() {
     await this.loadConfig();
-    if (this.config?.apiKey) {
-      await this.fetchWeather();
-      this.startAutoRefresh();
-    } else {
-      this.loading = false;
-    }
+    await this.fetchWeather();
+    this.startAutoRefresh();
   }
 
   async onWidgetInfoChanged(newWidgetInfo, oldWidgetInfo) {
@@ -46,30 +42,14 @@ export class WeatherWidget extends SunPanelWidgetElement {
     // 只有配置实际变化时才重新获取天气
     if (newConfig && JSON.stringify(newConfig) !== JSON.stringify(oldConfig)) {
       this.config = newConfig;
-      if (this.config?.apiKey) {
-        await this.fetchWeather();
-        // 刷新间隔可能变了，重新启动自动刷新
-        this.startAutoRefresh();
-      }
+      await this.fetchWeather();
+      // 刷新间隔可能变了，重新启动自动刷新
+      this.startAutoRefresh();
     }
   }
 
   async loadConfig() {
-    try {
-      const widgetConfig = this.spCtx.widgetInfo?.config;
-      if (widgetConfig?.apiKey) {
-        this.config = widgetConfig;
-        return;
-      }
-
-      // 从数据节点读取配置（apiKey 在 config 对象内）
-      const settings = await this.spCtx.api.dataNode.user.getByKey('settings', 'config');
-      if (settings?.apiKey) {
-        this.config = settings;
-      }
-    } catch (e) {
-      // 配置加载失败，使用默认值
-    }
+    this.config = this.spCtx.widgetInfo?.config || {};
   }
 
   startAutoRefresh() {
@@ -85,55 +65,24 @@ export class WeatherWidget extends SunPanelWidgetElement {
     }
   }
 
-  getLocationValue() {
-    const { locationMode, locationValue, longitude, latitude, location } = this.config;
-    if (locationValue) return locationValue;
-    if (locationMode === 'auto' && longitude && latitude) {
-      return `${longitude},${latitude}`;
-    }
-    return location;
-  }
-
   async fetchWeather() {
-    if (!this.config?.apiKey) return;
-
-    const location = this.getLocationValue();
-    if (!location) {
-      this.error = '请先配置位置信息';
-      this.loading = false;
-      return;
-    }
-
     this.loading = true;
     this.error = '';
 
-    const host = (this.config.apiHost || 'devapi.qweather.com').replace(/^https?:\/\//, '').replace(/\/$/, '');
-
-    // 调试：打印当前配置和数据节点信息
-    console.log('[WeatherWidget] 当前 config:', this.config);
-    console.log('[WeatherWidget] host:', host);
-    console.log('[WeatherWidget] location:', location);
-
-    // 尝试读取数据节点（目前存储失败，仅用于调试）
-    try {
-      const storedApiKey = await this.spCtx.api.dataNode.user.getByKey('settings', 'apiKey');
-      console.log('[WeatherWidget] 数据节点 settings.apiKey:', storedApiKey);
-    } catch (err) {
-      // 数据节点不存在，使用 widgetInfo.config 中的 apiKey
-    }
-
-    // 临时方案：直接在 URL 中使用 apiKey（dataNode 和 value 都不工作）
-    // TODO: 等 Sun-Panel 作者确认 templateReplacements 的正确用法后改回
-    const apiKeyValue = this.config.apiKey;
-
     const createRequest = (endpoint) => ({
-      targetUrl: `https://${host}/v7/${endpoint}?location=${location}&key=${apiKeyValue}`,
-      method: 'GET'
+      targetUrl: `https://{{host}}/v7/${endpoint}?location={{location}}&key={{apiKey}}`,
+      method: 'GET',
+      templateReplacements: [
+        { placeholder: '{{apiKey}}', fields: ['targetUrl'], dataNode: 'config.apiKey' },
+        { placeholder: '{{host}}', fields: ['targetUrl'], dataNode: 'config.apiHost' },
+        { placeholder: '{{location}}', fields: ['targetUrl'], dataNode: 'config.locationValue' }
+      ]
     });
 
     try {
-      const [nowRes, airRes, hourlyRes, dailyRes] = await Promise.all([
-        this.spCtx.api.network.request(createRequest('weather/now')),
+      // 先请求主天气，避免 templateReplacements 失败时并发放大错误日志
+      const nowRes = await this.spCtx.api.network.request(createRequest('weather/now'));
+      const [airRes, hourlyRes, dailyRes] = await Promise.all([
         this.spCtx.api.network.request(createRequest('air/now')).catch(() => null),
         this.spCtx.api.network.request(createRequest('weather/24h')),
         this.spCtx.api.network.request(createRequest('weather/7d'))
@@ -164,7 +113,12 @@ export class WeatherWidget extends SunPanelWidgetElement {
       if (dailyData?.code === '200') this.daily = dailyData.daily || [];
 
     } catch (e) {
-      this.error = e.message || '获取天气失败';
+      const msg = String(e?.message || '');
+      if (msg.includes('data node not found') || msg.includes('failed to get data node')) {
+        this.error = '请先在配置页保存（会写入加密占位所需数据）';
+      } else {
+        this.error = e.message || '获取天气失败';
+      }
       console.error('Weather fetch error:', e);
     } finally {
       this.loading = false;
@@ -206,7 +160,7 @@ export class WeatherWidget extends SunPanelWidgetElement {
 
   render() {
     const c = this.colors;
-    if (!this.config?.apiKey) {
+    if (!this.config || Object.keys(this.config).length === 0) {
       return html`<style>${this.baseStyle}.w{align-items:center;justify-content:center;font-size:11px;color:${c.textSub}}</style><div class="w">请配置 API Key</div>`;
     }
     if (this.loading) {
