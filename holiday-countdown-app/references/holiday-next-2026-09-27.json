@@ -1,0 +1,22 @@
+{
+  "code": 0,
+  "holiday": {
+    "holiday": true,
+    "name": "国庆节（休）",
+    "wage": 3,
+    "date": "2026-10-01",
+    "cnLunar": "八月廿一",
+    "rest": 229
+  },
+  "workday": null,
+  "type": {
+    "holiday": {
+      "type": 2,
+      "name": "国庆节（休）",
+      "week": 4,
+      "cnLunar": "八月廿一",
+      "extra_info": "国庆节",
+      "date": "2026-10-01"
+    }
+  }
+}

@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 340 220">
+    <defs>
+      <linearGradient id="bg-6366F1" x1="0" y1="0" x2="1" y2="1">
+        <stop offset="0%" stop-color="#6366F1" />
+        <stop offset="100%" stop-color="#8B5CF6" />
+      </linearGradient>
+      <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+        <feDropShadow dx="2" dy="4" stdDeviation="4" flood-opacity="0.1"/>
+      </filter>
+    </defs>
+    <rect x="10" y="10" width="320" height="200" rx="24" fill="url(#bg-6366F1)" opacity="0.15" />
+    <rect x="10" y="10" width="320" height="200" rx="24" fill="none" stroke="rgba(15,23,42,0.08)" stroke-width="1.5"/>
+    
+    <!-- 月亮 -->
+    <circle cx="170" cy="100" r="50" fill="#FEF3C7" filter="url(#shadow)" opacity="0.9"/>
+    <circle cx="150" cy="85" r="6" fill="#FDE68A" opacity="0.6"/>
+    <circle cx="190" cy="95" r="4" fill="#FDE68A" opacity="0.6"/>
+    <circle cx="175" cy="120" r="8" fill="#FDE68A" opacity="0.6"/>
+    
+    <!-- 玉兔背影/剪影 -->
+    <g transform="translate(170, 140)">
+      <ellipse cx="0" cy="0" rx="12" ry="8" fill="white" /> <!-- 身体 -->
+      <circle cx="-8" cy="-8" r="7" fill="white" /> <!-- 头 -->
+      <ellipse cx="-6" cy="-18" rx="2.5" ry="8" fill="white" transform="rotate(-15, -6, -18)" /> <!-- 耳 -->
+      <ellipse cx="-12" cy="-16" rx="2.5" ry="8" fill="white" transform="rotate(-30, -12, -16)" /> <!-- 耳 -->
+      <circle cx="-16" cy="-4" r="1.5" fill="#FDA4AF" opacity="0.6"/> <!-- 腮红 -->
+    </g>
+    
+    <!-- 云彩 -->
+    <g fill="#A5B4FC" opacity="0.4">
+       <circle cx="100" cy="150" r="20" />
+       <circle cx="130" cy="160" r="25" />
+       <circle cx="210" cy="155" r="22" />
+       <circle cx="240" cy="145" r="18" />
+    </g>
+
+  </svg>

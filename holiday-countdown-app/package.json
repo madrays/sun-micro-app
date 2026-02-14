@@ -1,0 +1,19 @@
+{
+  "name": "holiday-countdown-app",
+  "version": "1.0.0",
+  "description": "Sun-Panel 节假日倒计时微应用",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "pack": "vite build && node scripts/pack.js"
+  },
+  "dependencies": {
+    "@sun-panel/micro-app": "latest",
+    "lit": "^3.1.0"
+  },
+  "devDependencies": {
+    "canvas": "^3.2.1",
+    "vite": "^5.0.0"
+  }
+}
