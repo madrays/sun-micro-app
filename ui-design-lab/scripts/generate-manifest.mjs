@@ -11,6 +11,20 @@ const DEFAULT_GRID = {
   gap: 22
 };
 
+function formatShanghaiTimestamp(date = new Date()) {
+  const text = new Intl.DateTimeFormat('sv-SE', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(date);
+  return `${text.replace(' ', 'T')}+08:00`;
+}
+
 function safeRead(filePath) {
   try {
     return fs.readFileSync(filePath, 'utf8');
@@ -235,14 +249,30 @@ function collectApps() {
   return apps.sort((a, b) => a.id.localeCompare(b.id));
 }
 
-const manifest = {
-  generatedAt: new Date().toISOString(),
-  workspaceRoot,
-  gridStandard: DEFAULT_GRID,
-  apps: collectApps()
-};
+export function createManifest() {
+  const now = new Date();
+  return {
+    generatedAt: formatShanghaiTimestamp(now),
+    generatedAtUtc: now.toISOString(),
+    workspaceRoot,
+    gridStandard: DEFAULT_GRID,
+    apps: collectApps()
+  };
+}
 
-const outPath = path.join(labRoot, 'public', 'manifest.json');
-fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2), 'utf8');
-console.log(`Generated manifest: ${outPath}`);
-console.log(`Apps: ${manifest.apps.length}`);
+export function generateManifestFile() {
+  const manifest = createManifest();
+  const outPath = path.join(labRoot, 'public', 'manifest.json');
+  fs.writeFileSync(outPath, JSON.stringify(manifest, null, 2), 'utf8');
+  return { manifest, outPath };
+}
+
+function runCli() {
+  const { manifest, outPath } = generateManifestFile();
+  console.log(`Generated manifest: ${outPath}`);
+  console.log(`Apps: ${manifest.apps.length}`);
+}
+
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  runCli();
+}

@@ -15,6 +15,12 @@ const STATE = {
   previewScale: 1,
   showGridLines: false,
   showElementOutlines: false,
+  editMode: false,
+  editPreviewKey: '',
+  editSelectedElement: null,
+  editSelectedChange: null,
+  editChanges: [],
+  dragSession: null,
   renderToken: 0,
   classCache: new Map(),
   lastPickedElement: null,
@@ -139,6 +145,15 @@ function buildDebugOverrides() {
       outline-offset: -1px !important;
       box-shadow: 0 0 0 2px rgba(245, 158, 11, .3) !important;
       background-clip: padding-box;
+    }
+    .sp-edit-selected{
+      outline: 2px solid #22d3ee !important;
+      outline-offset: -1px !important;
+      box-shadow: 0 0 0 2px rgba(34, 211, 238, .30) !important;
+    }
+    .sp-edit-changed:not(.sp-edit-selected){
+      outline: 1px dashed rgba(34, 211, 238, .55) !important;
+      outline-offset: -1px !important;
     }
     .debug-art{
       width: 100%;
@@ -391,7 +406,7 @@ function mockSvg() {
   </svg>`;
 }
 
-function renderPreviewHost(target, widget, size, appId, token, dims) {
+function renderPreviewHost(target, widget, size, appId, token, dims, previewKey) {
   const scale = STATE.previewScale;
   const scaledWidth = dims.isFullWidth ? null : Math.round(dims.width * scale);
   const scaledHeight = Math.round(dims.height * scale);
@@ -434,11 +449,20 @@ function renderPreviewHost(target, widget, size, appId, token, dims) {
   `;
 
   shadow.addEventListener('click', (evt) => {
-    evt.preventDefault();
-    evt.stopPropagation();
-
     const t = evt.target;
     if (!(t instanceof Element)) return;
+
+    const inEditMode = STATE.editMode && STATE.editPreviewKey === previewKey;
+    if (inEditMode) {
+      evt.preventDefault();
+      evt.stopPropagation();
+      selectEditableElement(t, shadow);
+      showToast('已选中元素：拖动鼠标；按 +/- 缩放；Shift + +/- 调整字体');
+      return;
+    }
+
+    evt.preventDefault();
+    evt.stopPropagation();
     markPickedElement(t);
     const style = getComputedStyle(t);
     const rect = t.getBoundingClientRect();
@@ -488,6 +512,66 @@ function renderPreviewHost(target, widget, size, appId, token, dims) {
     copyElementInfo(payload);
   });
 
+  function endDrag(evt) {
+    if (!STATE.dragSession) return;
+    if (evt && evt.pointerId !== undefined && STATE.dragSession.pointerId !== evt.pointerId) return;
+    const selected = STATE.editSelectedElement;
+    if (selected?.releasePointerCapture && STATE.dragSession.pointerId !== undefined) {
+      try {
+        selected.releasePointerCapture(STATE.dragSession.pointerId);
+      } catch {
+        // ignore
+      }
+    }
+    if (selected) selected.style.cursor = 'grab';
+    STATE.dragSession = null;
+  }
+
+  shadow.addEventListener('pointerdown', (evt) => {
+    if (!(STATE.editMode && STATE.editPreviewKey === previewKey)) return;
+    const t = evt.target;
+    if (!(t instanceof Element)) return;
+    evt.preventDefault();
+    evt.stopPropagation();
+    selectEditableElement(t, shadow);
+    const change = STATE.editSelectedChange;
+    if (!change) return;
+    STATE.dragSession = {
+      pointerId: evt.pointerId,
+      startX: evt.clientX,
+      startY: evt.clientY,
+      originX: change.translateX,
+      originY: change.translateY
+    };
+    const selected = STATE.editSelectedElement;
+    if (selected?.setPointerCapture) {
+      try {
+        selected.setPointerCapture(evt.pointerId);
+      } catch {
+        // ignore
+      }
+    }
+    if (selected) selected.style.cursor = 'grabbing';
+  });
+
+  shadow.addEventListener('pointermove', (evt) => {
+    if (!(STATE.editMode && STATE.editPreviewKey === previewKey)) return;
+    const drag = STATE.dragSession;
+    if (!drag || drag.pointerId !== evt.pointerId) return;
+    evt.preventDefault();
+    const change = STATE.editSelectedChange;
+    const selected = STATE.editSelectedElement;
+    if (!change || !selected) return;
+    const dx = evt.clientX - drag.startX;
+    const dy = evt.clientY - drag.startY;
+    change.translateX = drag.originX + dx;
+    change.translateY = drag.originY + dy;
+    applyEditChangeToElement(selected, change);
+  });
+
+  shadow.addEventListener('pointerup', endDrag);
+  shadow.addEventListener('pointercancel', endDrag);
+
   zoom.appendChild(host);
   stage.appendChild(zoom);
   target.appendChild(stage);
@@ -519,7 +603,11 @@ function buildControlPanel(root) {
   const widgetSelect = el('select');
   widgetSelect.id = 'widget-select';
 
-  groupA.append(appLabel, appSelect, widgetLabel, widgetSelect);
+  const refreshManifestBtn = el('button', '', '刷新最新改动');
+  refreshManifestBtn.id = 'manifest-refresh-btn';
+  refreshManifestBtn.style.marginTop = '8px';
+
+  groupA.append(appLabel, appSelect, widgetLabel, widgetSelect, refreshManifestBtn);
 
   const groupB = el('div', 'control-group');
   groupB.appendChild(el('div', 'label', '网格标准（px）'));
@@ -615,6 +703,8 @@ function buildControlPanel(root) {
     '1) 在右侧预览区域点击任意元素',
     '2) 将自动复制 JSON（元素路径、尺寸、关键样式）',
     '3) 直接粘贴给 AI，能精确沟通溢出/布局问题',
+    '4) 单尺寸/放大模式下可点“编辑”，拖动元素，按 +/- 缩放',
+    '5) Shift + +/- 调整选中元素字体，点“复制更改”发给 AI',
     '',
     '说明：该调试台强制 overflow: visible，超出也会显示，方便定位。'
   ].join('\n');
@@ -671,6 +761,14 @@ function syncOptions() {
   });
 }
 
+function formatVersionTime(generatedAt) {
+  const text = String(generatedAt || '').trim();
+  if (!text) return '-';
+  const m = text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}:\d{2}:\d{2})/);
+  if (!m) return text;
+  return `${m[1]}-${Number(m[2])}-${Number(m[3])} ${m[4]}`;
+}
+
 function renderStats(widget, app) {
   const stat = document.getElementById('stat');
   stat.innerHTML = '';
@@ -680,8 +778,9 @@ function renderStats(widget, app) {
     `标准：unit=${STATE.unit}px gap=${STATE.gap}px`,
     `预设：${PRESETS.find((p) => p.id === STATE.preset)?.name || '-'}`,
     `预览缩放：${Math.round(STATE.previewScale * 100)}%${STATE.previewScale > 1 ? '（单尺寸锁定）' : ''}`,
+    `编辑模式：${STATE.editMode ? '开启' : '关闭'}`,
     `文字颜色：${STATE.widgetTheme === 'light' ? '浅色' : '深色'}`,
-    `manifest 生成：${STATE.manifest.generatedAt}`
+    `版本时间：${formatVersionTime(STATE.manifest.generatedAt)}`
   ];
   items.forEach((text) => {
     stat.appendChild(el('div', 'chip', text));
@@ -709,6 +808,142 @@ function getSizeStyleSnippet(widget, size) {
   return '(未提取到 sizeStyle，使用调试台 fallback)';
 }
 
+function resetEditState({ keepMode = false, keepPreviewKey = false } = {}) {
+  const prev = STATE.editSelectedElement;
+  if (prev && prev.isConnected && prev.classList) {
+    prev.classList.remove('sp-edit-selected');
+  }
+  STATE.editSelectedElement = null;
+  STATE.editSelectedChange = null;
+  STATE.dragSession = null;
+  STATE.editChanges = [];
+  if (!keepMode) STATE.editMode = false;
+  if (!keepPreviewKey) STATE.editPreviewKey = '';
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function getOrCreateEditChange(element, shadowRoot) {
+  const selector = selectorPath(element, shadowRoot);
+  const existing = STATE.editChanges.find((c) => c.selectorPath === selector);
+  if (existing) return existing;
+  const computed = getComputedStyle(element);
+  const baseFontPx = Number.parseFloat(computed.fontSize) || 14;
+  const change = {
+    selectorPath: selector,
+    tag: element.tagName.toLowerCase(),
+    className: element.className || '',
+    translateX: 0,
+    translateY: 0,
+    scale: 1,
+    fontScale: 1,
+    baseFontPx
+  };
+  STATE.editChanges.push(change);
+  return change;
+}
+
+function applyEditChangeToElement(element, change) {
+  if (!element || !change) return;
+  element.classList.add('sp-edit-changed');
+  element.style.translate = `${change.translateX}px ${change.translateY}px`;
+  element.style.scale = String(change.scale);
+  element.style.fontSize = `${(change.baseFontPx * change.fontScale).toFixed(2)}px`;
+  element.style.cursor = 'grab';
+}
+
+function selectEditableElement(element, shadowRoot) {
+  if (!(element instanceof Element)) return;
+  if (STATE.editSelectedElement && STATE.editSelectedElement.classList) {
+    STATE.editSelectedElement.classList.remove('sp-edit-selected');
+  }
+  const change = getOrCreateEditChange(element, shadowRoot);
+  applyEditChangeToElement(element, change);
+  element.classList.add('sp-edit-selected');
+  STATE.editSelectedElement = element;
+  STATE.editSelectedChange = change;
+}
+
+function canUseEditMode(sizes) {
+  return (sizes?.length || 0) === 1 || STATE.previewScale > 1;
+}
+
+function isMeaningfulEditChange(change) {
+  if (!change) return false;
+  return Math.abs(change.translateX) > 0.05
+    || Math.abs(change.translateY) > 0.05
+    || Math.abs(change.scale - 1) > 0.001
+    || Math.abs(change.fontScale - 1) > 0.001;
+}
+
+function getEffectiveEditChanges() {
+  return STATE.editChanges.filter(isMeaningfulEditChange);
+}
+
+async function copyEditChangesPayload(appId, widgetId, size) {
+  const effectiveChanges = getEffectiveEditChanges();
+  if (!effectiveChanges.length) {
+    showToast('暂无更改可复制');
+    return;
+  }
+  const payload = {
+    appId,
+    widgetId,
+    size,
+    mode: 'edit-assist',
+    changedAt: new Date().toISOString(),
+    changes: effectiveChanges.map((c) => ({
+      selectorPath: c.selectorPath,
+      tag: c.tag,
+      className: c.className,
+      before: {
+        translateX: 0,
+        translateY: 0,
+        scale: 1,
+        fontScale: 1,
+        computedFontPx: Number(c.baseFontPx.toFixed(2))
+      },
+      after: {
+        translateX: Number(c.translateX.toFixed(2)),
+        translateY: Number(c.translateY.toFixed(2)),
+        scale: Number(c.scale.toFixed(3)),
+        fontScale: Number(c.fontScale.toFixed(3)),
+        computedFontPx: Number((c.baseFontPx * c.fontScale).toFixed(2))
+      }
+    })),
+    promptHint: '请基于 before/after 的最终差异，修改对应组件布局与字体，忽略中间编辑过程。'
+  };
+  try {
+    await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+    showToast(`已复制更改：${effectiveChanges.length} 项`);
+  } catch {
+    showToast('复制更改失败，请检查浏览器权限');
+  }
+}
+
+function handleEditKeyboardShortcut(evt) {
+  if (!STATE.editMode) return;
+  if (!STATE.editSelectedElement || !STATE.editSelectedChange) return;
+  const activeTag = document.activeElement?.tagName;
+  if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT') return;
+
+  const isPlus = evt.key === '+' || evt.key === '=' || evt.code === 'NumpadAdd';
+  const isMinus = evt.key === '-' || evt.code === 'NumpadSubtract';
+  if (!isPlus && !isMinus) return;
+  evt.preventDefault();
+
+  const step = isPlus ? 0.05 : -0.05;
+  const change = STATE.editSelectedChange;
+  if (evt.shiftKey) {
+    change.fontScale = clamp(change.fontScale + step, 0.4, 4);
+  } else {
+    change.scale = clamp(change.scale + step, 0.2, 5);
+  }
+  applyEditChangeToElement(STATE.editSelectedElement, change);
+}
+
 function nextZoomLevel(current) {
   const idx = ZOOM_LEVELS.findIndex((v) => Math.abs(v - current) < 0.001);
   const nextIdx = idx === -1 ? 0 : (idx + 1) % ZOOM_LEVELS.length;
@@ -728,6 +963,12 @@ function renderPreviews() {
     STATE.lastPickedElement.classList.remove('sp-picked-copy');
   }
   STATE.lastPickedElement = null;
+  if (STATE.editSelectedElement && STATE.editSelectedElement.classList) {
+    STATE.editSelectedElement.classList.remove('sp-edit-selected');
+  }
+  STATE.editSelectedElement = null;
+  STATE.editSelectedChange = null;
+  STATE.dragSession = null;
   const oldGrid = document.getElementById('preview-grid');
   const grid = el('div', 'preview-grid');
   grid.id = 'preview-grid';
@@ -743,11 +984,16 @@ function renderPreviews() {
   renderStats(widget, app);
 
   const sizes = getPresetSizes(widget);
+  const editableMode = canUseEditMode(sizes);
+  if (!editableMode && STATE.editMode) {
+    resetEditState();
+  }
   if (sizes.length === 1) {
     grid.classList.add('single-mode');
   }
   sizes.forEach((size) => {
     const dims = calcPx(size, STATE.unit, STATE.gap);
+    const previewKey = `${app.id}::${widget.id}::${size}`;
     const scaledWidth = dims.isFullWidth ? null : Math.round(dims.width * STATE.previewScale);
     const scaledHeight = Math.round(dims.height * STATE.previewScale);
 
@@ -765,6 +1011,43 @@ function renderPreviews() {
     title.append(left, right);
 
     const tools = el('div', 'preview-tools');
+    if (editableMode) {
+      const editBtn = document.createElement('button');
+      editBtn.type = 'button';
+      editBtn.className = `zoom-btn edit-btn${STATE.editMode && STATE.editPreviewKey === previewKey ? ' active' : ''}`;
+      editBtn.title = '进入编辑模式';
+      editBtn.textContent = STATE.editMode && STATE.editPreviewKey === previewKey ? '退出编辑' : '编辑';
+      editBtn.addEventListener('click', (evt) => {
+        evt.preventDefault();
+        evt.stopPropagation();
+        if (STATE.editMode && STATE.editPreviewKey === previewKey) {
+          resetEditState();
+          showToast('已退出编辑模式');
+        } else {
+          resetEditState();
+          STATE.editMode = true;
+          STATE.editPreviewKey = previewKey;
+          showToast('已进入编辑模式：拖动元素；按 +/- 缩放；Shift + +/- 调整字体');
+        }
+        renderPreviews();
+      });
+      tools.appendChild(editBtn);
+
+      if (STATE.editMode && STATE.editPreviewKey === previewKey) {
+        const copyChangeBtn = document.createElement('button');
+        copyChangeBtn.type = 'button';
+        copyChangeBtn.className = 'zoom-btn copy-change-btn';
+        copyChangeBtn.title = '复制当前编辑更改';
+        copyChangeBtn.textContent = `复制更改${getEffectiveEditChanges().length ? `(${getEffectiveEditChanges().length})` : ''}`;
+        copyChangeBtn.addEventListener('click', async (evt) => {
+          evt.preventDefault();
+          evt.stopPropagation();
+          await copyEditChangesPayload(app.id, widget.id, size);
+        });
+        tools.appendChild(copyChangeBtn);
+      }
+    }
+
     const zoomBtn = document.createElement('button');
     zoomBtn.type = 'button';
     zoomBtn.className = 'zoom-btn';
@@ -801,7 +1084,7 @@ function renderPreviews() {
 
     const viewport = el('div', 'preview-viewport');
     applyViewportTone(viewport);
-    renderPreviewHost(viewport, widget, size, app.id, token, dims);
+    renderPreviewHost(viewport, widget, size, app.id, token, dims, previewKey);
 
     const source = document.createElement('details');
     source.className = 'source-block';
@@ -828,6 +1111,7 @@ function bindEvents() {
   const dayNightSelect = document.getElementById('day-night-select');
   const gridLinesToggle = document.getElementById('grid-lines-toggle');
   const elementOutlineToggle = document.getElementById('element-outline-toggle');
+  const refreshManifestBtn = document.getElementById('manifest-refresh-btn');
 
   appSelect.addEventListener('change', () => {
     STATE.appId = appSelect.value;
@@ -888,22 +1172,90 @@ function bindEvents() {
     renderPreviews();
   });
 
+  refreshManifestBtn.addEventListener('click', () => {
+    refreshManifestFromServer();
+  });
+
   document.querySelectorAll('.preset-bar button').forEach((btn) => {
     btn.addEventListener('click', () => {
       STATE.preset = btn.dataset.preset;
       if (STATE.preset === 'all') {
         STATE.previewScale = 1;
+        resetEditState();
       }
       refreshPresetButtons();
       renderPreviews();
     });
   });
+
+  document.addEventListener('keydown', handleEditKeyboardShortcut);
 }
 
 async function loadManifest() {
   const res = await fetch('/manifest.json', { cache: 'no-cache' });
   if (!res.ok) throw new Error(`manifest 加载失败: ${res.status}`);
   return res.json();
+}
+
+async function refreshManifestFromServer() {
+  const btn = document.getElementById('manifest-refresh-btn');
+  const originalText = btn?.textContent || '刷新最新改动';
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '刷新中...';
+  }
+
+  try {
+    const prev = {
+      appId: STATE.appId,
+      widgetId: STATE.widgetId,
+      selectedSize: STATE.selectedSize
+    };
+
+    const refreshRes = await fetch('/__manifest/refresh', { method: 'POST' });
+    const refreshData = await refreshRes.json().catch(() => ({}));
+    if (!refreshRes.ok || refreshData?.ok === false) {
+      throw new Error(refreshData?.message || `刷新失败(${refreshRes.status})`);
+    }
+
+    STATE.classCache.clear();
+    STATE.manifest = await loadManifest();
+    if (!Array.isArray(STATE.manifest?.apps) || STATE.manifest.apps.length === 0) {
+      throw new Error('刷新后未发现可用微应用');
+    }
+
+    const appExists = STATE.manifest.apps.some((app) => app.id === prev.appId);
+    if (appExists) {
+      STATE.appId = prev.appId;
+      const app = findApp();
+      const widgetExists = app?.widgets?.some((w) => w.id === prev.widgetId);
+      if (widgetExists) {
+        STATE.widgetId = prev.widgetId;
+        const widget = findWidget();
+        STATE.selectedSize = widget?.sizes?.includes(prev.selectedSize)
+          ? prev.selectedSize
+          : (widget?.sizes?.[0] || '2x2');
+      } else {
+        STATE.widgetId = app?.widgets?.[0]?.id || '';
+        STATE.selectedSize = app?.widgets?.[0]?.sizes?.[0] || '2x2';
+      }
+    } else {
+      pickInitialState();
+    }
+
+    resetEditState();
+    syncOptions();
+    refreshPresetButtons();
+    renderPreviews();
+    showToast(`已刷新清单：${refreshData?.apps ?? STATE.manifest.apps.length} 个应用`);
+  } catch (err) {
+    showToast(`刷新失败：${err?.message || err}`);
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  }
 }
 
 function pickInitialState() {
