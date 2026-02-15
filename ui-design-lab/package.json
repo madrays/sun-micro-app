@@ -1,0 +1,18 @@
+{
+  "name": "ui-design-lab",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate": "node scripts/generate-manifest.mjs",
+    "dev": "npm run generate && vite",
+    "build": "npm run generate && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "lit": "^3.3.1"
+  },
+  "devDependencies": {
+    "vite": "^5.4.21"
+  }
+}
