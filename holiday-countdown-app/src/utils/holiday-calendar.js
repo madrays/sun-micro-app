@@ -126,6 +126,33 @@ export function resolveTrueFestivalDate(name, baseDate = new Date(), fallbackDat
   }
 }
 
+// 计算所有节日，返回最近的一个
+export function getNextHoliday(baseDate = new Date()) {
+  const base = startOfDay(baseDate);
+  const y1 = base.getFullYear();
+  const y2 = y1 + 1;
+
+  const pick = (d1, d2) => {
+    const c1 = d1 && d1 >= base ? d1 : null;
+    const c2 = d2 && d2 >= base ? d2 : null;
+    if (c1 && c2) return c1 <= c2 ? c1 : c2;
+    return c1 || c2 || null;
+  };
+
+  const holidays = [
+    { name: '元旦节', date: pick(new Date(y1, 0, 1), new Date(y2, 0, 1)) },
+    { name: '春节', date: pick(getLunarFestivalDate(y1, '正月', 1), getLunarFestivalDate(y2, '正月', 1)) },
+    { name: '清明节', date: pick(new Date(y1, 3, qingmingDay(y1)), new Date(y2, 3, qingmingDay(y2))) },
+    { name: '劳动节', date: pick(new Date(y1, 4, 1), new Date(y2, 4, 1)) },
+    { name: '端午节', date: pick(getLunarFestivalDate(y1, '五月', 5), getLunarFestivalDate(y2, '五月', 5)) },
+    { name: '中秋节', date: pick(getLunarFestivalDate(y1, '八月', 15), getLunarFestivalDate(y2, '八月', 15)) },
+    { name: '国庆节', date: pick(new Date(y1, 9, 1), new Date(y2, 9, 1)) }
+  ].filter(h => h.date);
+
+  holidays.sort((a, b) => a.date.getTime() - b.date.getTime());
+  return holidays[0] || null;
+}
+
 function enrichHoliday(rawHoliday, baseDate) {
   if (!rawHoliday?.date) return null;
   const dateObj = parseDateKey(rawHoliday.date);

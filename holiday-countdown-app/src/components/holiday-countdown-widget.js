@@ -4,8 +4,7 @@ import {
   daysBetween,
   formatHolidayDate,
   normalizeHolidayName,
-  parseNextHolidayResponse,
-  resolveTrueFestivalDate
+  getNextHoliday
 } from '../utils/holiday-calendar.js';
 import { getHolidayArtDataUri } from '../utils/holiday-art.js';
 
@@ -16,12 +15,6 @@ function dateKeyOf(date = new Date()) {
   return `${y}-${m}-${d}`;
 }
 
-function secondsToNextDay() {
-  const now = new Date();
-  const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
-  return Math.max(60, Math.floor((next.getTime() - now.getTime()) / 1000));
-}
-
 export class HolidayCountdownWidget extends SunPanelWidgetElement {
   static properties = {
     snapshot: { type: Object },
@@ -29,8 +22,6 @@ export class HolidayCountdownWidget extends SunPanelWidgetElement {
     error: { type: String },
     config: { type: Object }
   };
-
-  static inflightMap = new Map();
 
   constructor() {
     super();
@@ -75,83 +66,35 @@ export class HolidayCountdownWidget extends SunPanelWidgetElement {
     this._timer = setInterval(() => this.compute({ force: true }), 60 * 60 * 1000);
   }
 
-  async getCache(key) {
-    try {
-      return await this.spCtx.api.localCache.app.get(key);
-    } catch (e) {
-      return null;
-    }
-  }
-
-  async setCache(key, value, ttlSec) {
-    try {
-      await this.spCtx.api.localCache.app.set(key, value, ttlSec);
-    } catch (e) {
-      // ignore
-    }
-  }
-
-  async withInflight(key, loader) {
-    const existed = HolidayCountdownWidget.inflightMap.get(key);
-    if (existed) return existed;
-    const p = (async () => {
-      try {
-        return await loader();
-      } finally {
-        HolidayCountdownWidget.inflightMap.delete(key);
-      }
-    })();
-    HolidayCountdownWidget.inflightMap.set(key, p);
-    return p;
-  }
-
-  async fetchNextHoliday(nowDateKey) {
-    return this.spCtx.api.network.request({
-      targetUrl: `https://holiday.ailcc.com/api/holiday/next/${nowDateKey}?type=Y&week=Y`,
-      method: 'GET'
-    });
-  }
-
-  async getNextWithCache(nowDateKey, now) {
-    const cacheKey = `holiday-next-${nowDateKey}`;
-    const cached = await this.getCache(cacheKey);
-    if (cached?.code === 0) {
-      return parseNextHolidayResponse(cached, now);
-    }
-
-    const res = await this.withInflight(cacheKey, async () => this.fetchNextHoliday(nowDateKey));
-    await this.setCache(cacheKey, res, secondsToNextDay());
-    return parseNextHolidayResponse(res, now);
-  }
-
   async _computeCore() {
     this.loading = true;
     this.error = '';
     try {
       const now = new Date();
       const nowDateKey = dateKeyOf(now);
-      const nextSnapshot = await this.getNextWithCache(nowDateKey, now);
-      const rawNext = nextSnapshot.next;
 
-      const trueDate = resolveTrueFestivalDate(rawNext?.normalizedName || rawNext?.name, now, rawNext?.dateObj || null);
-      const trueDaysLeft = trueDate ? daysBetween(now, trueDate) : rawNext?.daysLeft;
-      const next = rawNext
-        ? {
-          ...rawNext,
-          dateObj: trueDate || rawNext.dateObj,
-          date: trueDate ? formatHolidayDate(trueDate) : rawNext.date,
-          daysLeft: typeof trueDaysLeft === 'number' ? trueDaysLeft : rawNext.daysLeft,
-          isToday: trueDaysLeft === 0
-        }
-        : null;
+      // 直接本地计算下一个节日，不依赖 API
+      const nextHoliday = getNextHoliday(now);
+      if (!nextHoliday) {
+        throw new Error('未获取到下一个节假日');
+      }
+
+      const daysLeft = daysBetween(now, nextHoliday.date);
+      const next = {
+        name: nextHoliday.name,
+        normalizedName: nextHoliday.name,
+        dateObj: nextHoliday.date,
+        date: formatHolidayDate(nextHoliday.date),
+        daysLeft,
+        isToday: daysLeft === 0
+      };
 
       this.snapshot = {
-        today: nextSnapshot.today,
+        today: nowDateKey,
         next
       };
     } catch (e) {
-      const status = Number(e?.response?.status || 0);
-      this.error = status === 429 ? '接口限流，请稍后重试' : (e?.message || '节假日接口请求失败');
+      this.error = e?.message || '节假日计算失败';
       this.snapshot = null;
     } finally {
       this.loading = false;

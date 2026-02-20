@@ -9,6 +9,7 @@ package-lock.json
 dist/
 build/
 *.zip
+!**/packages/*.zip
 
 # IDE
 .idea/
