@@ -21,6 +21,8 @@ sundev/
 ├── hslr-hello-world-1.0.0/      # Hello World 示例
 ├── weather-app/                 # 天气微应用（和风天气）
 ├── holiday-countdown-app/       # 节假日倒计时微应用
+├── qb-downloader-app/           # qBittorrent 下载器监控
+├── pixel-pet-app/               # 像素宠物养成
 └── ui-design-lab/               # AI 协作 UI 调试台
 ```
 
@@ -55,6 +57,41 @@ npm run dev
 
 ```bash
 cd holiday-countdown-app
+npm install
+npm run dev
+```
+
+## QB 下载器（qb-downloader-app）
+
+### 功能特性
+
+- qBittorrent WebUI 状态监控
+- 实时上传/下载速度
+- 种子统计（下载中、做种、暂停、总数）
+- 累计流量、分享率、磁盘剩余
+- 支持尺寸：`1x1`、`1x2`、`2x1`、`2x2`、`2x4`
+
+### 开发
+
+```bash
+cd qb-downloader-app
+npm install
+npm run dev
+```
+
+## 像素宠物（pixel-pet-app）
+
+### 功能特性
+
+- 像素风格虚拟宠物养成
+- 喂食、玩耍、抚摸、治疗互动
+- 状态持久化存储
+- 支持尺寸：`2x2`、`2x4`
+
+### 开发
+
+```bash
+cd pixel-pet-app
 npm install
 npm run dev
 ```

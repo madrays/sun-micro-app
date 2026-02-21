@@ -219,6 +219,25 @@ function makeDemoConfig(widget) {
     };
   }
 
+  if (/qb/i.test(widget.id)) {
+    return {
+      host: 'http://localhost:8080',
+      refreshInterval: 5,
+      textMode: config.textMode
+    };
+  }
+
+  if (/pet/i.test(widget.id)) {
+    return {
+      petType: 'cat',
+      petName: '小橘',
+      personality: 'cheerful',
+      petStyle: 'cute',
+      tagStyle: 0,
+      textMode: config.textMode
+    };
+  }
+
   return config;
 }
 
@@ -271,6 +290,29 @@ function applyDemoState(instance, widget, size) {
       { fxDate: '2026-02-18', iconDay: '100', tempMin: '0', tempMax: '7' },
       { fxDate: '2026-02-19', iconDay: '101', tempMin: '1', tempMax: '8' }
     ];
+  }
+
+  if (/qb/i.test(widget.id)) {
+    instance.data = {
+      dl_info_speed: 15728640, up_info_speed: 5242880,
+      alltime_dl: 1099511627776, alltime_ul: 549755813888,
+      global_ratio: '1.85', free_space_on_disk: 214748364800
+    };
+    instance.torrents = {
+      t1: { state: 'downloading', progress: 0.5 },
+      t2: { state: 'uploading', progress: 1 },
+      t3: { state: 'pausedUP', progress: 1 },
+      t4: { state: 'stalledUP', progress: 1 },
+      t5: { state: 'downloading', progress: 0.3 }
+    };
+  }
+
+  if (/pet/i.test(widget.id)) {
+    instance.state = { hunger: 80, happy: 70, love: 60, health: 90 };
+    instance.action = 'idle';
+    instance.frame = 0;
+    instance.dialogue = '喵~';
+    instance.showBubble = true;
   }
 }
 

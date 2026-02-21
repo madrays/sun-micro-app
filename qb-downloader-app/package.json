@@ -1,0 +1,18 @@
+{
+  "name": "qb-downloader-app",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "pack": "vite build && node scripts/pack.js"
+  },
+  "dependencies": {
+    "@sun-panel/micro-app": "latest",
+    "lit": "^3.1.0"
+  },
+  "devDependencies": {
+    "vite": "^5.0.0",
+    "archiver": "^6.0.1"
+  }
+}
